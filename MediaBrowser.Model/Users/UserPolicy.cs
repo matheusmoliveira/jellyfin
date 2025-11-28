@@ -22,13 +22,16 @@ namespace MediaBrowser.Model.Users
             EnableContentDeletion = false;
             EnableContentDeletionFromFolders = Array.Empty<string>();
 
-            EnableSyncTranscoding = true;
+            // Disable transcoding by default to force Direct Play/Stream for better performance with many concurrent users
+            EnableSyncTranscoding = false;
             EnableMediaConversion = true;
 
             EnableMediaPlayback = true;
-            EnableAudioPlaybackTranscoding = true;
-            EnableVideoPlaybackTranscoding = true;
-            EnablePlaybackRemuxing = true;
+            // Disable audio/video transcoding by default - users should use Direct Play only
+            EnableAudioPlaybackTranscoding = false;
+            EnableVideoPlaybackTranscoding = false;
+            // Disable remuxing to prevent ANY FFmpeg usage - only Direct Play allowed (zero CPU usage)
+            EnablePlaybackRemuxing = false;
             ForceRemoteSourceTranscoding = false;
             EnableLiveTvManagement = true;
             EnableLiveTvAccess = true;

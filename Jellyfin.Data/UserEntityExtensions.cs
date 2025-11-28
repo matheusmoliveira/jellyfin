@@ -179,15 +179,18 @@ public static class UserEntityExtensions
         entity.Permissions.Add(new Permission(PermissionKind.EnableContentDownloading, true));
         entity.Permissions.Add(new Permission(PermissionKind.EnableMediaConversion, true));
         entity.Permissions.Add(new Permission(PermissionKind.EnableMediaPlayback, true));
-        entity.Permissions.Add(new Permission(PermissionKind.EnablePlaybackRemuxing, true));
+        // Disable remuxing to prevent ANY FFmpeg usage - only Direct Play allowed
+        entity.Permissions.Add(new Permission(PermissionKind.EnablePlaybackRemuxing, false));
         entity.Permissions.Add(new Permission(PermissionKind.EnablePublicSharing, true));
         entity.Permissions.Add(new Permission(PermissionKind.EnableRemoteAccess, true));
-        entity.Permissions.Add(new Permission(PermissionKind.EnableSyncTranscoding, true));
-        entity.Permissions.Add(new Permission(PermissionKind.EnableAudioPlaybackTranscoding, true));
+        entity.Permissions.Add(new Permission(PermissionKind.EnableSyncTranscoding, false));
+        // Disable transcoding by default to force Direct Play/Stream for better performance with many concurrent users
+        entity.Permissions.Add(new Permission(PermissionKind.EnableAudioPlaybackTranscoding, false));
         entity.Permissions.Add(new Permission(PermissionKind.EnableLiveTvAccess, true));
         entity.Permissions.Add(new Permission(PermissionKind.EnableLiveTvManagement, true));
         entity.Permissions.Add(new Permission(PermissionKind.EnableSharedDeviceControl, true));
-        entity.Permissions.Add(new Permission(PermissionKind.EnableVideoPlaybackTranscoding, true));
+        // Disable video transcoding by default to force Direct Play/Stream for better performance with many concurrent users
+        entity.Permissions.Add(new Permission(PermissionKind.EnableVideoPlaybackTranscoding, false));
         entity.Permissions.Add(new Permission(PermissionKind.ForceRemoteSourceTranscoding, false));
         entity.Permissions.Add(new Permission(PermissionKind.EnableRemoteControlOfOtherUsers, false));
         entity.Permissions.Add(new Permission(PermissionKind.EnableCollectionManagement, false));

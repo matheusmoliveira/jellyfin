@@ -177,11 +177,6 @@ namespace MediaBrowser.MediaEncoding.Encoder
         public bool SetFFmpegPath()
         {
             var skipValidation = _config.GetFFmpegSkipValidation();
-            if (skipValidation)
-            {
-                _logger.LogWarning("FFmpeg: Skipping FFmpeg Validation due to FFmpeg:novalidation set to true");
-                return true;
-            }
 
             // 1) Check if the --ffmpeg CLI switch has been given
             var ffmpegPath = _startupOptionFFmpegPath;
@@ -197,6 +192,27 @@ namespace MediaBrowser.MediaEncoding.Encoder
                     ffmpegPath = "ffmpeg";
                     ffmpegPathSetMethodText = "system $PATH";
                 }
+            }
+
+            if (skipValidation)
+            {
+                _logger.LogWarning("FFmpeg: Skipping FFmpeg Validation due to FFmpeg:novalidation set to true");
+                // Still set the path even when validation is skipped
+                if (!string.IsNullOrEmpty(ffmpegPath))
+                {
+                    _ffmpegPath = ffmpegPath;
+                    // Determine a probe path from the mpeg path
+                    _ffprobePath = FfprobePathRegex().Replace(_ffmpegPath, "ffprobe$1");
+                    _logger.LogInformation("FFmpeg: {FfmpegPath} (validation skipped)", _ffmpegPath ?? string.Empty);
+                    _logger.LogInformation("FFprobe: {FfprobePath}", _ffprobePath ?? string.Empty);
+
+                    // Write the FFmpeg path to the config/encoding.xml file
+                    var encodingOptions = _configurationManager.GetEncodingOptions();
+                    encodingOptions.EncoderAppPathDisplay = _ffmpegPath ?? string.Empty;
+                    _configurationManager.SaveConfiguration("encoding", encodingOptions);
+                }
+
+                return true;
             }
 
             if (!ValidatePath(ffmpegPath))

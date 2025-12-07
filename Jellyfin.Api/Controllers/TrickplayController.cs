@@ -13,6 +13,7 @@ using MediaBrowser.Model;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using NetMimeTypes = MediaBrowser.Model.Net.MimeTypes;
 
 namespace Jellyfin.Api.Controllers;
 
@@ -63,7 +64,7 @@ public class TrickplayController : BaseJellyfinApiController
             return NotFound();
         }
 
-        return Content(playlist, MimeTypes.GetMimeType("playlist.m3u8"), Encoding.UTF8);
+        return Content(playlist, NetMimeTypes.GetMimeType("playlist.m3u8"), Encoding.UTF8);
     }
 
     /// <summary>

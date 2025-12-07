@@ -63,7 +63,7 @@ namespace MediaBrowser.Model.Net
         }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
-        /// Used for extensions not in <see cref="Model.MimeTypes"/> or to override them.
+        /// Used for extensions not in the standard MIME types or to override them.
         /// </summary>
         private static readonly FrozenDictionary<string, string> _mimeTypeLookup = new KeyValuePair<string, string>[]
         {
@@ -166,11 +166,6 @@ namespace MediaBrowser.Model.Net
                 return result;
             }
 
-            if (Model.MimeTypes.TryGetMimeType(filename, out var mimeType))
-            {
-                return mimeType;
-            }
-
             // Catch-all for all video types that don't require specific mime types
             if (_videoFileExtensions.Contains(ext))
             {
@@ -192,8 +187,7 @@ namespace MediaBrowser.Model.Net
                 return result;
             }
 
-            var extension = Model.MimeTypes.GetMimeTypeExtensions(mimeType).FirstOrDefault();
-            return string.IsNullOrEmpty(extension) ? null : "." + extension;
+            return null;
         }
 
         public static bool IsImage(ReadOnlySpan<char> mimeType)

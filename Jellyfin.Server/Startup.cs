@@ -133,6 +133,7 @@ namespace Jellyfin.Server
             services.AddHostedService<LibraryChangedNotifier>();
             services.AddHostedService<UserDataChangeNotifier>();
             services.AddHostedService<RecordingNotifier>();
+            services.AddHostedService<HlsCatalogImporterHostedService>();
         }
 
         /// <summary>

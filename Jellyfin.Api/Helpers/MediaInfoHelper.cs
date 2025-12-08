@@ -212,7 +212,13 @@ public class MediaInfoHelper
 
         var user = _userManager.GetUserById(userId) ?? throw new ResourceNotFoundException();
 
-        if (!enableDirectPlay)
+        // Don't override SupportsDirectPlay for external HTTP URLs from .strm files
+        // These are handled by ExternalHlsMediaSourceProvider and should support direct play
+        var isExternalHttpUrl = !string.IsNullOrEmpty(mediaSource.Path) &&
+            (mediaSource.Path.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+             mediaSource.Path.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+
+        if (!enableDirectPlay && !isExternalHttpUrl)
         {
             mediaSource.SupportsDirectPlay = false;
         }
@@ -262,7 +268,12 @@ public class MediaInfoHelper
             streamInfo.PlaySessionId = playSessionId;
             streamInfo.StartPositionTicks = startTimeTicks;
 
-            mediaSource.SupportsDirectPlay = streamInfo.PlayMethod == PlayMethod.DirectPlay;
+            // Don't override SupportsDirectPlay for external HTTP URLs from .strm files
+            // These are handled by ExternalHlsMediaSourceProvider and should support direct play
+            if (!isExternalHttpUrl)
+            {
+                mediaSource.SupportsDirectPlay = streamInfo.PlayMethod == PlayMethod.DirectPlay;
+            }
 
             // Players do not handle this being set according to PlayMethod
             mediaSource.SupportsDirectStream =
@@ -292,7 +303,9 @@ public class MediaInfoHelper
                 }
             }
 
-            if (mediaSource.IsRemote && user.HasPermission(PermissionKind.ForceRemoteSourceTranscoding))
+            // Don't override SupportsDirectPlay for external HTTP URLs from .strm files
+            // These are handled by ExternalHlsMediaSourceProvider and should support direct play
+            if (mediaSource.IsRemote && user.HasPermission(PermissionKind.ForceRemoteSourceTranscoding) && !isExternalHttpUrl)
             {
                 mediaSource.SupportsDirectPlay = false;
                 mediaSource.SupportsDirectStream = false;

@@ -23,7 +23,6 @@ namespace Jellyfin.Server.Implementations.Library
     /// </summary>
     public class ExternalHlsMediaSourceProvider : IMediaSourceProvider
     {
-        private const string ExternalHlsBaseUrl = "https://jellyfin.codexsengineer.com.br/filmes";
         private const string SlugProviderKey = "HlsSlug";
         private readonly ILogger<ExternalHlsMediaSourceProvider> _logger;
         private readonly IServerApplicationHost _appHost;
@@ -48,6 +47,52 @@ namespace Jellyfin.Server.Implementations.Library
             if (item is not Video video)
             {
                 return Task.FromResult(Enumerable.Empty<MediaSourceInfo>());
+            }
+
+            // Check if this is a .strm file with an HTTP URL (external HLS stream)
+            if (!string.IsNullOrEmpty(video.Path) && video.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase))
+            {
+                // Check if the .strm file contains an HTTP URL
+                if (!string.IsNullOrEmpty(video.ShortcutPath) &&
+                    (video.ShortcutPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                     video.ShortcutPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+                {
+                    // This is a .strm file with an external HTTP URL
+                    // Create a MediaSourceInfo that marks SupportsDirectPlay = true for HTTP URLs
+                    _logger.LogInformation("Found .strm file with external HTTP URL for item {ItemName} (ID: {ItemId}): {Url}", video.Name, video.Id, video.ShortcutPath);
+                    var strmMediaSource = new MediaSourceInfo
+                    {
+                        Id = video.Id.ToString("N"), // Use the same ID as the item to ensure it's selected
+                        Path = video.ShortcutPath, // Use the HTTP URL from .strm file
+                        Protocol = MediaProtocol.Http,
+                        Container = video.ShortcutPath.Contains(".m3u8", StringComparison.OrdinalIgnoreCase) ? "m3u8" : null,
+                        SupportsDirectPlay = true, // Mark as supporting direct play for HTTP URLs
+                        SupportsDirectStream = false,
+                        SupportsTranscoding = false,
+                        IsRemote = true,
+                        Type = MediaSourceType.Default,
+                        Name = "External Stream",
+                        MediaStreams = video.ShortcutPath.Contains(".m3u8", StringComparison.OrdinalIgnoreCase)
+                            ? new MediaStream[]
+                            {
+                                new MediaStream
+                                {
+                                    Type = MediaStreamType.Video,
+                                    Index = -1,
+                                    Codec = "h264"
+                                },
+                                new MediaStream
+                                {
+                                    Type = MediaStreamType.Audio,
+                                    Index = -1,
+                                    Codec = "aac"
+                                }
+                            }
+                            : Array.Empty<MediaStream>()
+                    };
+
+                    return Task.FromResult<IEnumerable<MediaSourceInfo>>(new[] { strmMediaSource });
+                }
             }
 
             // Check if the item has an IMDb ID

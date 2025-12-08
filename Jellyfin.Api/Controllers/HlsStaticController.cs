@@ -127,7 +127,7 @@ namespace Jellyfin.Api.Controllers
             // If it's a master.m3u8 or variant playlist file, rewrite URLs to point to our controller
             if (extension == ".m3u8")
             {
-                var masterContent = await System.IO.File.ReadAllTextAsync(requestedFilePath, cancellationToken: HttpContext.RequestAborted);
+                var masterContent = await System.IO.File.ReadAllTextAsync(requestedFilePath, cancellationToken: HttpContext.RequestAborted).ConfigureAwait(false);
 
                 // Rewrite relative URLs to point to our controller
                 // Match lines that are not comments and contain file extensions

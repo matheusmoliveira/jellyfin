@@ -230,7 +230,7 @@ public class HlsCatalogController : ControllerBase
         };
 
         var items = _libraryManager.GetItemList(query);
-        var item = items.FirstOrDefault();
+        var item = items.Count > 0 ? items[0] : null;
 
         _logger.LogDebug("FindByImdb query for {ImdbId} returned {Count} items", imdbId, items.Count);
 
@@ -357,7 +357,7 @@ public class HlsCatalogController : ControllerBase
         };
 
         var items = _libraryManager.GetItemList(query);
-        var item = items.FirstOrDefault();
+        var item = items.Count > 0 ? items[0] : null;
 
         _logger.LogDebug("FindBySlug query for {Slug} returned {Count} items", slug, items.Count);
 

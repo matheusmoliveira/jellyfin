@@ -2,6 +2,8 @@
 
 # Script para atualizar Play TV Server e Web Client no servidor rodando
 
+set -euo pipefail
+
 # Configurações do Play TV
 GITHUB_USER="matheusmoliveira"
 SERVER_REPO="jellyfin"
@@ -10,12 +12,32 @@ GITHUB_BRANCH="dev"
 WEB_INTERFACE_DIR="/usr/share/jellyfin/web"
 SERVER_INSTALL_DIR="/usr/lib/jellyfin"
 
+# Runtime deps
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || {
+        echo "ERROR: Missing dependency '$1' in PATH."
+        exit 1
+    }
+}
+
 # Check that we're root; if not, fail out
 if [[ $(whoami) != "root" ]]; then
     echo "ERROR: This script must be run as 'root' or with 'sudo' to function."
     echo "Try using this command instead: sudo bash update-playtv.sh"
     exit 1
 fi
+
+require_cmd git
+require_cmd dotnet
+require_cmd rsync
+require_cmd npm
+
+cleanup() {
+    if [[ -n "${TMP_DIR:-}" && -d "${TMP_DIR:-}" ]]; then
+        rm -rf "${TMP_DIR}" || true
+    fi
+}
+trap cleanup EXIT
 
 echo "=========================================="
 echo "  Atualizando Play TV"
@@ -24,10 +46,7 @@ echo
 
 # Stop Jellyfin service
 echo "> Parando serviço Jellyfin."
-systemctl stop jellyfin.service
-if [[ $? -gt 0 ]]; then
-    echo "WARNING: Failed to stop Jellyfin service. Continuing anyway..."
-fi
+systemctl stop jellyfin.service || echo "WARNING: Failed to stop Jellyfin service. Continuing anyway..."
 echo
 
 # Create temporary directory for building
@@ -59,10 +78,6 @@ fi
 
 echo "> Projeto encontrado: ${SERVER_PROJECT}"
 dotnet publish "${SERVER_PROJECT}" --configuration Release --output "${TMP_DIR}/server-build"
-if [[ $? -gt 0 ]]; then
-    echo "ERROR: Failed to build server."
-    exit 1
-fi
 echo
 
 # Install the server
@@ -82,7 +97,8 @@ fi
 
 # Copy server files to installation directory
 echo "> Copiando arquivos do servidor."
-cp -r "${TMP_DIR}/server-build"/* "${SERVER_INSTALL_DIR}/"
+mkdir -p "${SERVER_INSTALL_DIR}"
+rsync -a --delete "${TMP_DIR}/server-build"/ "${SERVER_INSTALL_DIR}/"
 chown -R jellyfin:jellyfin "${SERVER_INSTALL_DIR}"
 echo
 
@@ -99,18 +115,14 @@ fi
 cd jellyfin-web
 
 echo "> Instalando dependências do web client."
-npm install
-if [[ $? -gt 0 ]]; then
-    echo "ERROR: Failed to install npm dependencies."
-    exit 1
+if [[ -f package-lock.json ]]; then
+    npm ci --no-audit --no-fund
+else
+    npm install --no-audit --no-fund
 fi
 
 echo "> Compilando Play TV Web Client."
 npm run build:production
-if [[ $? -gt 0 ]]; then
-    echo "ERROR: Failed to build web interface."
-    exit 1
-fi
 
 # Backup current web interface
 if [[ -d "${WEB_INTERFACE_DIR}" ]]; then
@@ -123,13 +135,13 @@ fi
 # Install web interface
 echo "> Instalando Play TV Web Client."
 mkdir -p "${WEB_INTERFACE_DIR}"
-cp -r dist/* "${WEB_INTERFACE_DIR}/"
+if [[ ! -d dist ]]; then
+    echo "ERROR: Build output directory 'dist' not found."
+    exit 1
+fi
+rsync -a --delete dist/ "${WEB_INTERFACE_DIR}/"
 chown -R jellyfin:jellyfin "${WEB_INTERFACE_DIR}"
 echo
-
-# Clean up
-cd /
-rm -rf "${TMP_DIR}"
 
 # Start Jellyfin service
 echo "> Reiniciando serviço Jellyfin."

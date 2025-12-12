@@ -11,6 +11,7 @@ WEB_REPO="jellyfin-web"
 GITHUB_BRANCH="dev"
 WEB_INTERFACE_DIR="/usr/share/jellyfin/web"
 SERVER_INSTALL_DIR="/usr/lib/jellyfin"
+KEEP_TMP="${KEEP_TMP:-0}" # 1 = não apaga o diretório temporário (útil para debug)
 
 # Runtime deps
 require_cmd() {
@@ -33,6 +34,10 @@ require_cmd rsync
 require_cmd npm
 
 cleanup() {
+    if [[ "${KEEP_TMP}" == "1" ]]; then
+        echo "INFO: KEEP_TMP=1, mantendo TMP_DIR em: ${TMP_DIR:-<unset>}"
+        return
+    fi
     if [[ -n "${TMP_DIR:-}" && -d "${TMP_DIR:-}" ]]; then
         rm -rf "${TMP_DIR}" || true
     fi
@@ -122,6 +127,24 @@ else
 fi
 
 echo "> Compilando Play TV Web Client."
+if [[ -z "${NODE_OPTIONS:-}" ]]; then
+    # Ajusta heap do Node baseado na RAM disponível para reduzir chance de OOM durante o webpack.
+    # (cap entre 1024 e 6144 MB)
+    MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+    if [[ "${MEM_MB}" -gt 0 ]]; then
+        HEAP_MB=$((MEM_MB * 70 / 100))
+        if [[ "${HEAP_MB}" -lt 1024 ]]; then HEAP_MB=1024; fi
+        if [[ "${HEAP_MB}" -gt 6144 ]]; then HEAP_MB=6144; fi
+        export NODE_OPTIONS="--max-old-space-size=${HEAP_MB}"
+        echo "INFO: NODE_OPTIONS não definido; usando ${NODE_OPTIONS} (MemTotal=${MEM_MB}MB)"
+    else
+        export NODE_OPTIONS="--max-old-space-size=2048"
+        echo "INFO: NODE_OPTIONS não definido; usando ${NODE_OPTIONS}"
+    fi
+else
+    echo "INFO: usando NODE_OPTIONS existente: ${NODE_OPTIONS}"
+fi
+
 npm run build:production
 
 # Backup current web interface

@@ -91,7 +91,7 @@ public sealed class HlsCatalogImporterHostedService : IHostedService
 
         try
         {
-            _cts.Cancel();
+            await _cts.CancelAsync().ConfigureAwait(false);
         }
         catch
         {

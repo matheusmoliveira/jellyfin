@@ -22,6 +22,7 @@ namespace Emby.Server.Implementations.EntryPoints;
 public sealed class HlsCatalogImporterHostedService : IHostedService
 {
     private const string CatalogFileName = "hls-catalog.json";
+    private static readonly TimeSpan DefaultPollInterval = TimeSpan.FromMinutes(2);
 
     private static readonly JsonSerializerOptions CatalogSerializerOptions = new()
     {
@@ -31,6 +32,11 @@ public sealed class HlsCatalogImporterHostedService : IHostedService
     private readonly ILogger<HlsCatalogImporterHostedService> _logger;
     private readonly IServerApplicationPaths _appPaths;
     private readonly ILibraryManager _libraryManager;
+    private CancellationTokenSource? _cts;
+    private Task? _backgroundTask;
+    private readonly TimeSpan _pollInterval;
+    private readonly string _moviesBaseUrl;
+    private readonly string _seriesBaseUrl;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="HlsCatalogImporterHostedService"/> class.
@@ -46,17 +52,102 @@ public sealed class HlsCatalogImporterHostedService : IHostedService
         _logger = logger;
         _appPaths = appPaths;
         _libraryManager = libraryManager;
+
+        // Configuráveis via env:
+        // - JELLYFIN_HLS_CATALOG_POLL_SECONDS (default: 120)
+        // - JELLYFIN_HLS_CATALOG_MOVIES_BASE_URL (default: https://cdn.codexsengineer.com.br/filmes)
+        // - JELLYFIN_HLS_CATALOG_SERIES_BASE_URL (default: https://cdn.codexsengineer.com.br/series)
+        if (int.TryParse(Environment.GetEnvironmentVariable("JELLYFIN_HLS_CATALOG_POLL_SECONDS"), out var pollSeconds)
+            && pollSeconds > 0)
+        {
+            _pollInterval = TimeSpan.FromSeconds(pollSeconds);
+        }
+        else
+        {
+            _pollInterval = DefaultPollInterval;
+        }
+
+        _moviesBaseUrl = (Environment.GetEnvironmentVariable("JELLYFIN_HLS_CATALOG_MOVIES_BASE_URL")
+                          ?? "https://cdn.codexsengineer.com.br/filmes").TrimEnd('/');
+        _seriesBaseUrl = (Environment.GetEnvironmentVariable("JELLYFIN_HLS_CATALOG_SERIES_BASE_URL")
+                          ?? "https://cdn.codexsengineer.com.br/series").TrimEnd('/');
     }
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _ = Task.Run(() => SyncCatalogAsync(cancellationToken), cancellationToken);
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _backgroundTask = Task.Run(() => RunLoopAsync(_cts.Token), _cts.Token);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        if (_cts is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _cts.Cancel();
+        }
+        catch
+        {
+            // ignore
+        }
+
+        if (_backgroundTask is not null)
+        {
+            try
+            {
+                await _backgroundTask.ConfigureAwait(false);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+    }
+
+    private async Task RunLoopAsync(CancellationToken cancellationToken)
+    {
+        var catalogPath = Path.Combine(_appPaths.DataPath, CatalogFileName);
+        DateTimeOffset? lastWrite = null;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (File.Exists(catalogPath))
+                {
+                    var currentWrite = File.GetLastWriteTimeUtc(catalogPath);
+                    var currentWriteOffset = new DateTimeOffset(currentWrite, TimeSpan.Zero);
+
+                    if (lastWrite is null || currentWriteOffset > lastWrite.Value)
+                    {
+                        _logger.LogInformation("HLS catalog changed (or first run). Syncing from '{Catalog}'.", catalogPath);
+                        await SyncCatalogAsync(cancellationToken).ConfigureAwait(false);
+                        lastWrite = currentWriteOffset;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unhandled error while watching HLS catalog.");
+            }
+
+            try
+            {
+                await Task.Delay(_pollInterval, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TaskCanceledException)
+            {
+                break;
+            }
+        }
+    }
 
     private async Task SyncCatalogAsync(CancellationToken cancellationToken)
     {
@@ -201,18 +292,18 @@ public sealed class HlsCatalogImporterHostedService : IHostedService
                 var seriesPath = ExtractSeriesPathFromSlug(slug);
                 if (!string.IsNullOrWhiteSpace(seriesPath))
                 {
-                    streamUrl = $"https://jellyfin.codexsengineer.com.br/series/{seriesPath}/hls/master.m3u8";
+                    streamUrl = $"{_seriesBaseUrl}/{EncodeUrlPath(seriesPath)}/hls/master.m3u8";
                 }
                 else
                 {
                     // Fallback: usa o slug completo
-                    streamUrl = $"https://jellyfin.codexsengineer.com.br/series/{slug}/hls/master.m3u8";
+                    streamUrl = $"{_seriesBaseUrl}/{EncodeUrlPath(slug)}/hls/master.m3u8";
                 }
             }
             else
             {
-                // Usa o padrão para filmes: https://jellyfin.codexsengineer.com.br/filmes/{slug}/hls/master.m3u8
-                streamUrl = $"https://jellyfin.codexsengineer.com.br/filmes/{slug}/hls/master.m3u8";
+                // Padrão para filmes: {MOVIES_BASE_URL}/{slug}/hls/master.m3u8
+                streamUrl = $"{_moviesBaseUrl}/{EncodeUrlPath(slug)}/hls/master.m3u8";
             }
         }
         else
@@ -437,6 +528,18 @@ public sealed class HlsCatalogImporterHostedService : IHostedService
         // - Contains "sXXeXX" pattern (e.g., "s05e01", "s1e1")
         // - Contains "episode" (case insensitive)
         return Regex.IsMatch(slug, @"(?:season|s\d+e\d+|episode)", RegexOptions.IgnoreCase);
+    }
+
+    private static string EncodeUrlPath(string path)
+    {
+        // Mantém separadores '/' e faz escape de cada segmento (espaços, parênteses, etc).
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return string.Join("/", parts.Select(Uri.EscapeDataString));
     }
 
     /// <summary>

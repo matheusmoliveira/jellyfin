@@ -27,6 +27,7 @@ namespace Jellyfin.Api.Controllers
         private readonly ILibraryManager _libraryManager;
         private readonly IFileSystem _fileSystem;
         private readonly ILogger<HlsStaticController> _logger;
+        private readonly string _publicBaseUrl;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="HlsStaticController"/> class.
@@ -42,6 +43,11 @@ namespace Jellyfin.Api.Controllers
             _libraryManager = libraryManager;
             _fileSystem = fileSystem;
             _logger = logger;
+
+            // Base pública (CDN) para entregar HLS VOD. Ex.:
+            //   https://cdn.codexsengineer.com.br/filmes
+            _publicBaseUrl = (Environment.GetEnvironmentVariable("JELLYFIN_HLS_STATIC_PUBLIC_BASE_URL")
+                              ?? "https://cdn.codexsengineer.com.br/filmes").TrimEnd('/');
         }
 
         /// <summary>
@@ -68,7 +74,14 @@ namespace Jellyfin.Api.Controllers
                 return NotFound();
             }
 
-            var masterM3u8Path = Path.Combine(videoDirectory, "master.m3u8");
+            // Nosso padrão: /<pasta do filme>/hls/master.m3u8
+            var masterM3u8Path = Path.Combine(videoDirectory, "hls", "master.m3u8");
+
+            // Fallbacks legados: /<pasta do filme>/master.m3u8 e /<pasta pai>/master.m3u8
+            if (!_fileSystem.FileExists(masterM3u8Path))
+            {
+                masterM3u8Path = Path.Combine(videoDirectory, "master.m3u8");
+            }
 
             // Check parent directory
             if (!_fileSystem.FileExists(masterM3u8Path))
@@ -129,13 +142,25 @@ namespace Jellyfin.Api.Controllers
             {
                 var masterContent = await System.IO.File.ReadAllTextAsync(requestedFilePath, cancellationToken: HttpContext.RequestAborted).ConfigureAwait(false);
 
-                // Rewrite relative URLs to point to our controller
-                // Match lines that are not comments and contain file extensions
-                var baseUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/HlsStatic/{itemId}";
-                var hlsDir = Path.GetDirectoryName(requestedFilePath);
-                var hlsDirName = Path.GetFileName(hlsDir);
+                // Reescreve caminhos relativos para a base pública (CDN) no formato:
+                //   {CDN_BASE}/{nome-da-pasta-do-filme}/hls/{relativePath}
+                // Observação: o arquivo master fica em .../<filme>/hls/master.m3u8 (padrão do seu gerador).
+                var videoDir = Path.GetDirectoryName(video.Path);
+                if (string.IsNullOrEmpty(videoDir))
+                {
+                    return Content(masterContent, contentType);
+                }
 
-                // Rewrite relative paths (e.g., "1080p/playlist.m3u8" or "segment001.ts")
+                var folderName = Path.GetFileName(videoDir);
+                if (string.IsNullOrEmpty(folderName))
+                {
+                    return Content(masterContent, contentType);
+                }
+
+                var folderNameEncoded = Uri.EscapeDataString(folderName);
+                var baseUrl = $"{_publicBaseUrl}/{folderNameEncoded}/hls";
+
+                // Rewrite relative paths (e.g., "stream_0/playlist.m3u8" or "stream_0/data000.ts")
                 var rewrittenContent = Regex.Replace(
                     masterContent,
                     @"^([^#\r\n]+\.(m3u8|ts|mp4|m4s))",
@@ -148,8 +173,7 @@ namespace Jellyfin.Api.Controllers
                             return match.Value;
                         }
 
-                        // Make it relative to the HLS directory
-                        return $"{baseUrl}/{relativePath}";
+                        return $"{baseUrl}/{relativePath.TrimStart('/')}";
                     },
                     RegexOptions.Multiline | RegexOptions.IgnoreCase);
 

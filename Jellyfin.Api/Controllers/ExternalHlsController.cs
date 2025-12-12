@@ -26,8 +26,16 @@ namespace Jellyfin.Api.Controllers
     [Route("HlsExternal")]
     public class ExternalHlsController : BaseJellyfinApiController
     {
-        // Base URL for external HLS files - matches the pattern from user's example
-        private const string ExternalHlsBaseUrl = "https://jellyfin.codexsengineer.com.br/filmes";
+        // Configuração via variáveis de ambiente (ideal para Docker/Deploy simples):
+        // - JELLYFIN_EXTERNAL_HLS_ORIGIN_BASE_URL: base do origin (onde os arquivos realmente estão), ex:
+        //     https://origin.codexsengineer.com.br/filmes
+        // - JELLYFIN_EXTERNAL_HLS_PUBLIC_BASE_URL: base pública (CDN), ex:
+        //     https://cdn.codexsengineer.com.br/filmes
+        //
+        // Observação: ambas devem apontar para o mesmo "prefixo" (/filmes), pois as URLs são reescritas
+        // para /{folderKey}/hls/{file}.
+        private readonly string _originBaseUrl;
+        private readonly string _publicBaseUrl;
 
         private readonly ILibraryManager _libraryManager;
         private readonly IHttpClientFactory _httpClientFactory;
@@ -47,6 +55,12 @@ namespace Jellyfin.Api.Controllers
             _libraryManager = libraryManager;
             _httpClientFactory = httpClientFactory;
             _logger = logger;
+
+            // Defaults: mantém compatibilidade com o comportamento antigo caso nada seja configurado.
+            _originBaseUrl = (Environment.GetEnvironmentVariable("JELLYFIN_EXTERNAL_HLS_ORIGIN_BASE_URL")
+                              ?? "https://origin.codexsengineer.com.br/filmes").TrimEnd('/');
+            _publicBaseUrl = (Environment.GetEnvironmentVariable("JELLYFIN_EXTERNAL_HLS_PUBLIC_BASE_URL")
+                              ?? "https://cdn.codexsengineer.com.br/filmes").TrimEnd('/');
         }
 
         /// <summary>
@@ -66,8 +80,9 @@ namespace Jellyfin.Api.Controllers
             }
 
             // Build the external URL
-            // Pattern: http://45.186.232.22/filmes/{folderKey}/hls/{file}
-            var externalUrl = $"{ExternalHlsBaseUrl}/{folderKey}/hls/{file}";
+            // Pattern: {ORIGIN_BASE}/{folderKey}/hls/{file}
+            var cleanFile = file.TrimStart('/');
+            var externalUrl = $"{_originBaseUrl}/{folderKey}/hls/{cleanFile}";
 
             _logger.LogInformation("Proxying external HLS request: {Url}", externalUrl);
 
@@ -136,10 +151,12 @@ namespace Jellyfin.Api.Controllers
                         directory = file[..lastSlash];
                     }
 
-                    var baseUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase}/HlsExternal/{folderKey}";
+                    // Reescreve para a base pública (CDN) em vez de apontar de volta para o Jellyfin.
+                    // Ex.: https://cdn.codexsengineer.com.br/filmes/{folderKey}/hls/...
+                    var baseUrl = $"{_publicBaseUrl}/{folderKey}/hls";
                     if (!string.IsNullOrEmpty(directory))
                     {
-                        baseUrl = $"{baseUrl}/{directory}";
+                        baseUrl = $"{baseUrl}/{directory.TrimStart('/')}";
                     }
 
                     _logger.LogDebug("Processando arquivo .m3u8: {File}, BaseUrl: {BaseUrl}, Directory: {Directory}", file, baseUrl, directory);
